@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+
+# Runtime / temporary files
+tmp/
+temp/
+
+# Generated inspection/input/output data
+data/input/
+data/output/
+data/inspections/
+
+# ML model weights
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# Jupyter
+.ipynb_checkpoints/
+# PaddleOCR model weights
+*.pdmodel
+*.pdiparams
+*.pdparams
+*.pdopt
+*.pdiparams.info

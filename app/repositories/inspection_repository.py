@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
 
+from datetime import datetime
+
 from app.models import (
     InspectionDetection,
     InspectionField,
@@ -12,9 +14,9 @@ class InspectionRepository:
         self.db = db
 
     # =========================================================
-    # CREATE
+    # CREATE / UPDATE
     # =========================================================
-    
+
     def create_run(
         self,
         image_path: str,
@@ -22,6 +24,11 @@ class InspectionRepository:
         segmentation_status: str,
         detection_status: str,
         processing_time_ms: float | None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        failed_stage: str | None = None,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
     ) -> InspectionRun:
         inspection = InspectionRun(
             image_path=image_path,
@@ -29,9 +36,54 @@ class InspectionRepository:
             segmentation_status=segmentation_status,
             detection_status=detection_status,
             processing_time_ms=processing_time_ms,
+            error_code=error_code,
+            error_message=error_message,
+            failed_stage=failed_stage,
+            started_at=started_at,
+            completed_at=completed_at,
         )
 
         self.db.add(inspection)
+        self.db.flush()
+
+        return inspection
+
+    def update_run_status(
+        self,
+        inspection: InspectionRun,
+        *,
+        status: str,
+        segmentation_status: str | None = None,
+        detection_status: str | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        failed_stage: str | None = None,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
+    ) -> InspectionRun:
+        inspection.status = status
+
+        if segmentation_status is not None:
+            inspection.segmentation_status = segmentation_status
+
+        if detection_status is not None:
+            inspection.detection_status = detection_status
+
+        if error_code is not None:
+            inspection.error_code = error_code
+
+        if error_message is not None:
+            inspection.error_message = error_message
+
+        if failed_stage is not None:
+            inspection.failed_stage = failed_stage
+
+        if started_at is not None:
+            inspection.started_at = started_at
+
+        if completed_at is not None:
+            inspection.completed_at = completed_at
+
         self.db.flush()
 
         return inspection
@@ -99,11 +151,11 @@ class InspectionRepository:
             )
             .first()
         )
-        
+
     # =========================================================
     # TRANSACTION
     # =========================================================
-    
+
     def commit(self) -> None:
         self.db.commit()
 
@@ -115,5 +167,5 @@ class InspectionRepository:
         inspection: InspectionRun
     ) -> InspectionRun:
         self.db.refresh(inspection)
-        
+
         return inspection

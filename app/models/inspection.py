@@ -24,7 +24,7 @@ class InspectionRun(Base):
         String(30),
         nullable=False,
     )
-    
+
     segmentation_status: Mapped[str] = mapped_column(
         String(30),
         nullable=False,
@@ -34,7 +34,32 @@ class InspectionRun(Base):
         String(30),
         nullable=False,
     )
-    
+
+    error_code: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True
+    )
+
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
+    )
+
+    failed_stage: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
+    )
+
     processing_time_ms: Mapped[float | None] = mapped_column(
         Float,
         nullable=True,

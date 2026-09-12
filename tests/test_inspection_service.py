@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.services.inspection_service import InspectionService
 
+from app.models import InspectionRun
 
 class FakePipeline:
     def run(self, image_path: Path) -> dict:
@@ -186,7 +187,7 @@ def test_inspect_saves_fields(db_session, tmp_path):
     assert fields["brand"].source_detections == 2
 
 
-def test_inspect_rolls_back_on_error(db_session, tmp_path):
+def test_inspect_persists_failure_on_pipeline_error(db_session, tmp_path):
     image_path = tmp_path / "test.jpg"
     image_path.write_bytes(b"fake-image")
 
@@ -200,13 +201,19 @@ def test_inspect_rolls_back_on_error(db_session, tmp_path):
         image_store=FakeImageStore(),
     )
 
-    try:
-        service.inspect(image_path)
-    except RuntimeError as exc:
-        assert str(exc) == "pipeline failed"
-    else:
-        raise AssertionError(
-            "Expected RuntimeError was not raised"
-        )
+    result = service.inspect(image_path)
 
-    assert service.repository.get_run(999999) is None
+    assert result["status"] == "failed"
+
+    inspection = (
+        db_session.query(InspectionRun)
+        .filter_by(id=result["inspection_id"])
+        .one()
+    )
+
+    assert inspection.status == "failed"
+    assert inspection.error_code == "INSPECTION_FAILED"
+    assert inspection.error_message == "Inspection processing failed."
+    assert inspection.failed_stage == "pipeline"
+    assert inspection.started_at is not None
+    assert inspection.completed_at is not None

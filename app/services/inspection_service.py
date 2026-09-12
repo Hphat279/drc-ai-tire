@@ -1,9 +1,16 @@
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.repositories.inspection_repository import InspectionRepository
 
+from app.core.inspection_status import (
+    InspectionStageStatus,
+    InspectionStatus,
+)
+
+from app.core.pipeline_errors import PipelineStageError
 
 class InspectionService:
     def __init__(
@@ -19,52 +26,66 @@ class InspectionService:
     # =========================================================
     # CREATE INSPECTION
     # =========================================================
-    
+
     def inspect(
         self,
         image_path: Path,
     ) -> dict:
+        started_at = datetime.utcnow()
+
+
+        # =========================================================
+        # 1. Save image permanently
+        # =========================================================
+
+        storage_key = self.image_store.save(
+            image_path
+        )
+
+        # =========================================================
+        # 2. Create inspection run as PENDING
+        # =========================================================
+
+        inspection = self.repository.create_run(
+            image_path=storage_key,
+            status=InspectionStatus.PENDING,
+            segmentation_status=InspectionStageStatus.PENDING,
+            detection_status=InspectionStageStatus.PENDING,
+            processing_time_ms=None,
+        )
+
+        inspection_id = inspection.id
+
+        # IMPORTANT
+        # Lưu lại kết quả kiểm tra trước khi chạy quy trình xử lý AI.
+        self.repository.commit()
+
         try:
             # =========================
-            # 1. Run AI pipeline
+            # 3. Mark inspection as PROCESSING
             # =========================
-            
+
+            self.repository.update_run_status(
+                inspection,
+                status=InspectionStatus.PROCESSING,
+                segmentation_status=InspectionStageStatus.PROCESSING,
+                started_at=started_at,
+            )
+
+            self.repository.commit()
+
+            # =====================================================
+            # 4. Run AI pipeline
+            # =====================================================
+
             result = self.pipeline.run(
                 image_path
             )
 
             # =========================
-            # 2. Save image permanently
+            # 5. Save detections
             # =========================
-            
-            storage_key = self.image_store.save(
-                image_path
-            )
-                        
-            # =========================
-            # 3. Create inspection run
-            # =========================
-            
-            inspection = self.repository.create_run(
-                image_path=storage_key,
-                status=result["status"],
-                segmentation_status=(
-                    result["segmentation"]["status"]
-                ),
-                detection_status=(
-                    result["detections"]["status"]
-                ),
-                processing_time_ms=result.get(
-                    "processing_time_ms"
-                ),
-            )
 
-            inspection_id = inspection.id
-
-            # =========================
-            # 4. Save detections
-            # =========================
-            
             detections = result.get(
                 "detections",
                 {},
@@ -75,7 +96,7 @@ class InspectionService:
 
             for detection in detections:
                 bbox = detection["bbox"]
-                
+
                 self.repository.add_detection(
                     inspection_id=inspection_id,
                     class_name=detection["class_name"],
@@ -87,9 +108,9 @@ class InspectionService:
                 )
 
             # =========================
-            # 5. Save extracted fields
+            # 6. Save extracted fields
             # =========================
-            
+
             extraction = result.get(
                 "extraction",
                 {}
@@ -142,52 +163,122 @@ class InspectionService:
                 )
 
             # =========================
-            # 6. Commit transaction
+            # 7. Finalize inspection
             # =========================
-            
+
+            completed_at = datetime.utcnow()
+
+            self.repository.update_run_status(
+                inspection,
+                status=result["status"],
+                segmentation_status=(
+                    result["segmentation"]["status"]
+                ),
+                detection_status=(
+                    result["detections"]["status"]
+                ),
+                completed_at=completed_at,
+            )
+
+            # Preserve pipeline processing time.
+            inspection.processing_time_ms = result.get(
+                "processing_time_ms"
+            )
+
             self.repository.commit()
 
             # =========================
-            # 7. Return inspection ID
+            # 8. Return result
             # =========================
-            
+
             result["inspection_id"] = inspection_id
             result["image"] = storage_key
 
             return result
 
-        except Exception:
+        except PipelineStageError as exc:
+
             self.repository.rollback()
-            raise
-    
+
+            inspection = self.repository.get_run(
+                inspection_id
+            )
+
+            if inspection is None:
+                raise
+
+            self.repository.update_run_status(
+                inspection,
+                status=InspectionStatus.FAILED,
+                error_code=exc.code,
+                error_message=exc.message,
+                failed_stage=exc.stage,
+                completed_at=datetime.utcnow(),
+            )
+
+            self.repository.commit()
+
+            return self.get_inspection(
+                inspection_id
+            )
+
+        except Exception:
+            # =====================================================
+            # Unexpected failure
+            # =====================================================
+
+            self.repository.rollback()
+
+            inspection = self.repository.get_run(
+                inspection_id
+            )
+
+            if inspection is None:
+                raise
+
+            self.repository.update_run_status(
+                inspection,
+                status=InspectionStatus.FAILED,
+                error_code="INSPECTION_FAILED",
+                error_message="Inspection processing failed.",
+                failed_stage="pipeline",
+                completed_at=datetime.utcnow(),
+            )
+
+            self.repository.commit()
+
+            return self.get_inspection(
+                inspection_id
+            )
+
     # =========================================================
     # READ INSPECTION
     # =========================================================
-    
+
     def get_inspection(
         self,
         inspection_id: int,
     ) -> dict | None:
-        
+
         inspection = self.repository.get_run(
             inspection_id
         )
-        
+
         if inspection is None:
             return None
-        
+
         # =====================================================
         # Detection mapping
         # =====================================================
-        
+
         class_id_mapping = {
             "size": 0,
             "pattern": 1,
             "brand": 2,
         }
-        
+
         detection_items = []
-        
+
         for detection in inspection.detections:
             detection_items.append(
                 {
@@ -205,67 +296,67 @@ class InspectionService:
                     ],
                 }
             )
-        
+
         # =====================================================
         # Field mapping
         # =====================================================
-        
+
         fields = {
             field.field_name: field
             for field in inspection.fields
         }
-        
+
         def build_extraction_item(
             field_name: str,
         ) -> dict:
-            
+
             field = fields.get(field_name)
-            
+
             if field is None:
                 return {
                     "status": "not_detected",
                     "source_detections": 0,
                 }
-                
+
             return {
                 "status":field.extraction_status,
                 "source_detections": (
                     field.source_detections
                 ),
             }
-            
+
         def build_ocr_item(
             field_name: str,
         ) -> dict:
-            
+
             field = fields.get(field_name)
-            
+
             if field is None:
                 return {
                     "text": None,
                     "confidence": 0.0,
                     "status": "not_detected",
                 }
-            
+
             return {
                 "text": field.text,
                 "confidence": field.confidence,
                 "status": field.ocr_status,
             }
-            
+
         # =====================================================
         # Build API response
         # =====================================================
-        
+
         return {
             "inspection_id": inspection_id,
             "image": inspection.image_path,
             "status": inspection.status,
-            
+
             "segmentation": {
                 "status": inspection.segmentation_status,
             },
-            
+
             "extraction": {
                 "brand": build_extraction_item(
                     "brand"
@@ -277,12 +368,12 @@ class InspectionService:
                     "pattern"
                 ),
             },
-            
+
             "detections": {
                 "status": inspection.detection_status,
                 "items": detection_items,
             },
-            
+
             "ocr": {
                 "brand": build_ocr_item(
                     "brand"
@@ -294,7 +385,7 @@ class InspectionService:
                     "pattern"
                 ),
             },
-            
+
             "processing_time_ms": (
                 inspection.processing_time_ms
                 or 0.0

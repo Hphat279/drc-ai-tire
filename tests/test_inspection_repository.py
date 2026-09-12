@@ -2,6 +2,7 @@ from app.repositories.inspection_repository import (
     InspectionRepository,
 )
 
+from datetime import datetime
 
 def test_create_run(db_session):
     repository = InspectionRepository(db_session)
@@ -125,3 +126,136 @@ def test_get_run_not_found(db_session):
     )
 
     assert result is None
+
+
+def test_create_run_pending(db_session):
+    repository = InspectionRepository(db_session)
+
+    inspection = repository.create_run(
+        image_path="inspections/2026/09/test.jpg",
+        status="pending",
+        segmentation_status="pending",
+        detection_status="pending",
+        processing_time_ms=None,
+    )
+
+    repository.commit()
+
+    assert inspection.id is not None
+    assert inspection.status == "pending"
+    assert inspection.segmentation_status == "pending"
+    assert inspection.detection_status == "pending"
+    assert inspection.error_code is None
+    assert inspection.error_message is None
+    assert inspection.failed_stage is None
+    assert inspection.started_at is None
+    assert inspection.completed_at is None
+
+
+def test_update_run_status_processing(db_session):
+    repository = InspectionRepository(db_session)
+
+    inspection = repository.create_run(
+        image_path="inspections/2026/09/test.jpg",
+        status="pending",
+        segmentation_status="pending",
+        detection_status="pending",
+        processing_time_ms=None,
+    )
+    repository.commit()
+
+    started_at = datetime.utcnow()
+
+    repository.update_run_status(
+        inspection,
+        status="processing",
+        segmentation_status="processing",
+        detection_status="pending",
+        started_at=started_at,
+    )
+    repository.commit()
+
+    refreshed = repository.get_run(inspection.id)
+
+    assert refreshed is not None
+    assert refreshed.status == "processing"
+    assert refreshed.segmentation_status == "processing"
+    assert refreshed.detection_status == "pending"
+    assert refreshed.started_at == started_at
+    assert refreshed.completed_at is None
+
+
+def test_update_run_status_failed(db_session):
+    repository = InspectionRepository(db_session)
+
+    inspection = repository.create_run(
+        image_path="inspections/2026/09/test.jpg",
+        status="pending",
+        segmentation_status="pending",
+        detection_status="pending",
+        processing_time_ms=None,
+    )
+    repository.commit()
+
+    started_at = datetime.utcnow()
+    completed_at = datetime.utcnow()
+
+    repository.update_run_status(
+        inspection,
+        status="failed",
+        segmentation_status="failed",
+        detection_status="skipped",
+        error_code="SEGMENTATION_FAILED",
+        error_message="Segmentation stage failed.",
+        failed_stage="segmentation",
+        started_at=started_at,
+        completed_at=completed_at,
+    )
+    repository.commit()
+
+    refreshed = repository.get_run(inspection.id)
+
+    assert refreshed is not None
+    assert refreshed.status == "failed"
+    assert refreshed.segmentation_status == "failed"
+    assert refreshed.detection_status == "skipped"
+    assert refreshed.error_code == "SEGMENTATION_FAILED"
+    assert refreshed.error_message == "Segmentation stage failed."
+    assert refreshed.failed_stage == "segmentation"
+    assert refreshed.started_at == started_at
+    assert refreshed.completed_at == completed_at
+
+
+def test_update_run_status_success(db_session):
+    repository = InspectionRepository(db_session)
+
+    inspection = repository.create_run(
+        image_path="inspections/2026/09/test.jpg",
+        status="pending",
+        segmentation_status="pending",
+        detection_status="pending",
+        processing_time_ms=None,
+    )
+    repository.commit()
+
+    started_at = datetime.utcnow()
+    completed_at = datetime.utcnow()
+
+    repository.update_run_status(
+        inspection,
+        status="success",
+        segmentation_status="success",
+        detection_status="success",
+        started_at=started_at,
+        completed_at=completed_at,
+    )
+    repository.commit()
+
+    refreshed = repository.get_run(inspection.id)
+
+    assert refreshed is not None
+    assert refreshed.status == "success"
+    assert refreshed.segmentation_status == "success"
+    assert refreshed.detection_status == "success"
+    assert refreshed.started_at == started_at
+    assert refreshed.completed_at == completed_at

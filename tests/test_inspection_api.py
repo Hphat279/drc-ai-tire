@@ -164,6 +164,64 @@ def test_post_inspection_returns_pending(
     finally:
         teardown_app()
 
+def test_post_inspection_enqueue_failure(
+    db_session,
+    monkeypatch,
+):
+    setup_app(db_session)
+
+    try:
+        def fake_delay(inspection_id):
+            raise RuntimeError("Redis unavailable")
+
+        monkeypatch.setattr(
+            "app.api.v1.inspection.process_inspection.delay",
+            fake_delay,
+        )
+
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/v1/inspection",
+            files={
+                "image": (
+                    "test.jpg",
+                    b"fake-image-data",
+                    "image/jpeg",
+                )
+            },
+        )
+
+        assert response.status_code == 503
+
+        data = response.json()
+
+        assert data["error"]["code"] == (
+            "TASK_ENQUEUE_FAILED"
+        )
+
+        assert data["error"]["message"] == (
+            "Inspection task could not be queued."
+        )
+
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.get_run(
+            data["error"]["details"]["inspection_id"]
+        )
+
+        assert inspection is not None
+        assert inspection.status == "failed"
+        assert inspection.error_code == (
+            "TASK_ENQUEUE_FAILED"
+        )
+        assert inspection.failed_stage == "queue"
+        assert inspection.error_message == (
+            "Failed to enqueue inspection task."
+        )
+
+    finally:
+        teardown_app()
 
 def test_post_inspection_unsupported_format(db_session):
     setup_app(db_session)

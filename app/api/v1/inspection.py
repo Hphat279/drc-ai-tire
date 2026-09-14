@@ -155,10 +155,23 @@ async def inspect_tire(
         result = service.create_pending_inspection(
             image_path=image_path
         )
-        
-        process_inspection.delay(
-            result["inspection_id"]
-        )
+        try:
+            process_inspection.delay(
+                result["inspection_id"]
+            )
+        except Exception:
+            service.mark_enqueue_failed(
+                inspection_id=result["inspection_id"],
+                error_message="Failed to enqueue inspection task.",
+            )
+            raise APIError(
+                status_code=503,
+                code="TASK_ENQUEUE_FAILED",
+                message="Inspection task could not be queued.",
+                details={
+                    "inspection_id": result["inspection_id"],
+                },
+            )
         
         return result
     

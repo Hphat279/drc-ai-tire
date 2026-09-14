@@ -1,11 +1,12 @@
 from pathlib import Path
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db.database import get_db
 from app.repositories.inspection_repository import InspectionRepository
-
+from app.services.inspection_service import InspectionService
 
 class FakePipeline:
     def run(self, image_path: Path) -> dict:
@@ -218,6 +219,198 @@ def test_post_inspection_enqueue_failure(
         assert inspection.failed_stage == "queue"
         assert inspection.error_message == (
             "Failed to enqueue inspection task."
+        )
+
+    finally:
+        teardown_app()
+
+def test_inspection_detection_persistence_failure(
+    db_session,
+    monkeypatch,
+):
+    setup_app(db_session)
+
+    try:
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.create_run(
+            image_path="inspections/2026/09/test.jpg",
+            status="pending",
+            segmentation_status="pending",
+            detection_status="pending",
+            processing_time_ms=None,
+        )
+        repository.commit()
+
+        def fake_add_detection(*args, **kwargs):
+            raise RuntimeError(
+                "Detection persistence failed"
+            )
+
+        monkeypatch.setattr(
+            InspectionRepository,
+            "add_detection",
+            fake_add_detection,
+        )
+
+        service = InspectionService(
+            db=db_session,
+            pipeline=FakePipeline(),
+            image_store=FakeImageStorage(),
+        )
+
+        result = service.process_inspection(
+            inspection.id
+        )
+
+        assert result is not None
+        assert result["status"] == "failed"
+
+        inspection = repository.get_run(
+            inspection.id
+        )
+
+        assert inspection is not None
+        assert inspection.status == "failed"
+        assert inspection.error_code == (
+            "INSPECTION_FAILED"
+        )
+        assert inspection.failed_stage == "pipeline"
+        assert inspection.error_message == (
+            "Inspection processing failed."
+        )
+
+    finally:
+        teardown_app()
+
+def test_inspection_field_persistence_failure(
+    db_session,
+    monkeypatch,
+):
+    setup_app(db_session)
+
+    try:
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.create_run(
+            image_path="inspections/2026/09/test.jpg",
+            status="pending",
+            segmentation_status="pending",
+            detection_status="pending",
+            processing_time_ms=None,
+        )
+        repository.commit()
+
+        def fake_add_field(*args, **kwargs):
+            raise RuntimeError(
+                "Field persistence failed"
+            )
+
+        monkeypatch.setattr(
+            InspectionRepository,
+            "add_field",
+            fake_add_field,
+        )
+
+        service = InspectionService(
+            db=db_session,
+            pipeline=FakePipeline(),
+            image_store=FakeImageStorage(),
+        )
+
+        result = service.process_inspection(
+            inspection.id
+        )
+
+        assert result is not None
+        assert result["status"] == "failed"
+
+        inspection = repository.get_run(
+            inspection.id
+        )
+
+        assert inspection is not None
+        assert inspection.status == "failed"
+        assert inspection.error_code == (
+            "INSPECTION_FAILED"
+        )
+        assert inspection.failed_stage == "pipeline"
+        assert inspection.error_message == (
+            "Inspection processing failed."
+        )
+
+        detections = inspection.detections
+
+        assert detections == []
+
+    finally:
+        teardown_app()
+
+def test_inspection_commit_failure(
+    db_session,
+    monkeypatch,
+):
+    setup_app(db_session)
+
+    try:
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.create_run(
+            image_path="inspections/2026/09/test.jpg",
+            status="pending",
+            segmentation_status="pending",
+            detection_status="pending",
+            processing_time_ms=None,
+        )
+        repository.commit()
+
+        original_commit = InspectionRepository.commit
+        commit_calls = {"count": 0}
+
+        def fake_commit(self):
+            commit_calls["count"] += 1
+
+            if commit_calls["count"] == 2:
+                raise RuntimeError(
+                    "Database commit failed"
+                )
+
+            original_commit(self)
+
+        monkeypatch.setattr(
+            InspectionRepository,
+            "commit",
+            fake_commit,
+        )
+
+        service = InspectionService(
+            db=db_session,
+            pipeline=FakePipeline(),
+            image_store=FakeImageStorage(),
+        )
+
+        result = service.processing_service.process_new_run(
+            inspection_id=inspection.id,
+            image_path=Path("test.jpg"),
+            started_at=datetime.now(UTC),
+            storage_key="inspections/2026/09/test.jpg",
+        )
+
+        assert result is not None
+        assert result["status"] == "failed"
+
+        inspection = repository.get_run(
+            inspection.id
+        )
+
+        assert inspection is not None
+        assert inspection.status == "failed"
+        assert inspection.error_code == (
+            "INSPECTION_FAILED"
+        )
+        assert inspection.failed_stage == "pipeline"
+        assert inspection.error_message == (
+            "Inspection processing failed."
         )
 
     finally:

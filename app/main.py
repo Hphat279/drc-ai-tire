@@ -7,7 +7,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
-from app.ai.pipeline.tire_pipeline import TireInspectionPipeline
+from app.core.ai_dependencies import (
+    create_inspection_pipeline,
+    create_image_storage,
+)
 
 from app.api.v1.inspection import (
     router as inspection_router,
@@ -52,20 +55,11 @@ async def lifespan(
     print("Initializing DRC AI Tire Inspection...")
     print("=" * 60)
     
-    pipeline = TireInspectionPipeline(
-        segmentation_model_path=SEGMENTATION_MODEL_PATH,
-        detection_model_path=DETECTION_MODEL_PATH,
-        ocr_model_dir=OCR_MODEL_DIR,
-        ocr_dictionary_path=OCR_DICTIONARY_PATH,
-        output_dir=OUTPUT_DIR,
-        use_gpu=USE_GPU,
-    )
+    pipeline = create_inspection_pipeline()
 
     app.state.inspection_pipeline = pipeline
 
-    image_storage = LocalImageStorage(
-        root_dir=INSPECTION_IMAGE_DIR
-    )
+    image_storage = create_image_storage()
     
     app.state.image_storage = image_storage
 

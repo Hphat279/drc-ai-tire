@@ -46,3 +46,8 @@ INSPECTION_IMAGE_DIR = Path(
 USE_GPU = (
     os.environ["USE_GPU"].lower() == "true"
 )
+
+REDIS_URL = os.getenv(
+    "REDIS_URL",
+    "redis://localhost:6379/0",
+)

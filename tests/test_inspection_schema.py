@@ -6,6 +6,7 @@ from app.schemas.inspection import (
     ExtractionItem,
     InspectionResponse,
     OCRItem,
+    PendingInspectionResponse,
 )
 
 
@@ -174,3 +175,12 @@ def test_processing_time_cannot_be_negative():
             },
             processing_time_ms=-1.0,
         )
+        
+def test_pending_inspection_response():
+    response = PendingInspectionResponse(
+        inspection_id=123,
+        status="pending",
+    )
+
+    assert response.inspection_id == 123
+    assert response.status == "pending"

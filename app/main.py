@@ -7,10 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 
-from app.core.ai_dependencies import (
-    create_inspection_pipeline,
-    create_image_storage,
-)
+from app.core.storage_dependencies import create_image_storage
 
 from app.api.v1.inspection import (
     router as inspection_router,
@@ -52,19 +49,16 @@ async def lifespan(
     """
 
     print("=" * 60)
-    print("Initializing DRC AI Tire Inspection...")
+    print("Initializing DRC AI Tire API...")
     print("=" * 60)
-    
-    pipeline = create_inspection_pipeline()
-
-    app.state.inspection_pipeline = pipeline
 
     image_storage = create_image_storage()
     
     app.state.image_storage = image_storage
 
+    print("Image storage ready.")
     print("=" * 60)
-    print("AI Pipeline ready.")
+    print("DRC AI Tire API ready.")
     print("=" * 60)
 
     yield

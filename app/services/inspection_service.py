@@ -146,6 +146,33 @@ class InspectionService:
         )
 
     # ------------------------------------------------------------------
+    # ENQUEUE FAILURE
+    # ------------------------------------------------------------------
+    
+    def mark_enqueue_failed(
+        self,
+        *,
+        inspection_id: int,
+        error_message: str,
+    ) -> dict | None:
+        inspection = self.repository.get_run(inspection_id)
+
+        if inspection is None:
+            return None
+
+        self.repository.update_run_status(
+            inspection,
+            status=InspectionStatus.FAILED,
+            error_code="TASK_ENQUEUE_FAILED",
+            error_message=error_message,
+            failed_stage="queue",
+            completed_at=datetime.now(UTC),
+        )
+        self.repository.commit()
+
+        return InspectionResultMapper.to_response(inspection)
+    
+    # ------------------------------------------------------------------
     # ASYNCHRONOUS
     # ------------------------------------------------------------------
 

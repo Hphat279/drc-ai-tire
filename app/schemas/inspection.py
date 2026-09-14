@@ -1,6 +1,8 @@
 # Pydantic validate JSON output - Định nghĩa contract của API
 
 from pydantic import BaseModel, Field
+from typing import Literal
+
 
 class SegmentationResult(BaseModel):
     status: str = Field(min_length=1)
@@ -56,3 +58,7 @@ class InspectionResponse(BaseModel):
     ocr: OCRResult
 
     processing_time_ms: float = Field(ge=0)
+    
+class PendingInspectionResponse(BaseModel):
+    inspection_id: int = Field(ge=1)
+    status :Literal["pending"]= "pending"

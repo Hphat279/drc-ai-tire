@@ -1,14 +1,20 @@
 albucore==0.0.13
 albumentations==1.4.10
 alembic==1.19.1
+amqp==5.3.1
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.14.2
 astor==0.8.1
 beautifulsoup4==4.15.0
+billiard==4.2.4
+celery==5.6.3
 certifi==2026.7.22
 charset-normalizer==3.5.1
 click==8.5.0
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.3.0
 cloudpickle==3.1.2
 colorama==0.4.6
 contourpy==1.3.3
@@ -32,6 +38,7 @@ iniconfig==2.3.0
 Jinja2==3.1.6
 joblib==1.6.0
 kiwisolver==1.5.1
+kombu==5.6.2
 lazy-loader==0.5
 lmdb==2.3.0
 lxml==6.1.2
@@ -54,6 +61,7 @@ pillow==12.3.0
 pluggy==1.6.0
 polars==1.44.1
 polars-runtime-32==1.44.1
+prompt_toolkit==3.0.53
 protobuf==3.20.2
 psutil==7.2.2
 psycopg==3.3.4
@@ -71,6 +79,7 @@ python-dotenv==1.2.3
 python-multipart==0.0.32
 PyYAML==6.0.3
 RapidFuzz==3.14.6
+redis==6.4.0
 requests==2.34.2
 scikit-image==0.26.0
 scikit-learn==1.9.0
@@ -92,9 +101,12 @@ tqdm==4.70.0
 typing-inspection==0.4.4
 typing_extensions==4.16.0
 tzdata==2026.3
+tzlocal==5.4.4
 ultralytics==8.4.72
 ultralytics-thop==2.1.6
 urllib3==2.7.0
 uvicorn==0.52.4
+vine==5.1.0
 watchfiles==1.2.0
+wcwidth==0.8.3
 websockets==17.1

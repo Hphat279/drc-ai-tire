@@ -1,18 +1,39 @@
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
-
-from app.repositories.inspection_repository import InspectionRepository
 
 from app.core.inspection_status import (
     InspectionStageStatus,
     InspectionStatus,
 )
+from app.repositories.inspection_repository import (
+    InspectionRepository,
+)
+from app.services.inspection_processing_service import (
+    InspectionProcessingService,
+)
+from app.services.inspection_result_mapper import (
+    InspectionResultMapper,
+)
 
-from app.core.pipeline_errors import PipelineStageError
 
 class InspectionService:
+    """
+    Application service for tire inspection.
+
+    Responsibilities:
+    - create inspection runs
+    - coordinate synchronous inspection
+    - coordinate asynchronous inspection
+    - retrieve inspection results
+
+    Heavy processing and response mapping are delegated to
+    dedicated services.
+    """
+
     def __init__(
         self,
         db: Session,
@@ -20,245 +41,142 @@ class InspectionService:
         image_store=None,
     ):
         self.pipeline = pipeline
-        self.repository = InspectionRepository(db)
         self.image_store = image_store
 
-    # =========================================================
-    # CREATE INSPECTION
-    # =========================================================
+        self.repository = InspectionRepository(db)
 
-    def inspect(
+        self.processing_service = None
+
+        if (
+            pipeline is not None
+            and image_store is not None
+        ):
+            self.processing_service = (
+                InspectionProcessingService(
+                    repository=self.repository,
+                    pipeline=pipeline,
+                    image_store=image_store,
+                )
+            )
+
+    # ------------------------------------------------------------------
+    # CREATE
+    # ------------------------------------------------------------------
+
+    def create_pending_inspection(
         self,
         image_path: Path,
     ) -> dict:
-        started_at = datetime.utcnow()
+        """
+        Save the uploaded image and create a pending inspection run.
 
+        This method does NOT execute the AI pipeline.
+        """
 
-        # =========================================================
-        # 1. Save image permanently
-        # =========================================================
+        self._require_image_store()
 
         storage_key = self.image_store.save(
             image_path
         )
 
-        # =========================================================
-        # 2. Create inspection run as PENDING
-        # =========================================================
+        inspection = self.repository.create_run(
+            image_path=storage_key,
+            status=InspectionStatus.PENDING,
+            segmentation_status=(
+                InspectionStageStatus.PENDING
+            ),
+            detection_status=(
+                InspectionStageStatus.PENDING
+            ),
+            processing_time_ms=None,
+        )
+
+        self.repository.commit()
+
+        return {
+            "inspection_id": inspection.id,
+            "status": inspection.status,
+        }
+
+    # ------------------------------------------------------------------
+    # SYNCHRONOUS
+    # ------------------------------------------------------------------
+
+    def inspect(
+        self,
+        image_path: Path,
+    ) -> dict:
+        """
+        Execute an inspection synchronously.
+
+        This method is retained for backward compatibility
+        and existing synchronous tests.
+        """
+
+        self._require_image_store()
+        self._require_processing_service()
+
+        started_at = datetime.now(UTC)
+
+        storage_key = self.image_store.save(
+            image_path
+        )
 
         inspection = self.repository.create_run(
             image_path=storage_key,
             status=InspectionStatus.PENDING,
-            segmentation_status=InspectionStageStatus.PENDING,
-            detection_status=InspectionStageStatus.PENDING,
+            segmentation_status=(
+                InspectionStageStatus.PENDING
+            ),
+            detection_status=(
+                InspectionStageStatus.PENDING
+            ),
             processing_time_ms=None,
         )
 
         inspection_id = inspection.id
 
-        # IMPORTANT
-        # Lưu lại kết quả kiểm tra trước khi chạy quy trình xử lý AI.
         self.repository.commit()
 
-        try:
-            # =========================
-            # 3. Mark inspection as PROCESSING
-            # =========================
+        return self.processing_service.process_new_run(
+            inspection_id=inspection_id,
+            image_path=image_path,
+            started_at=started_at,
+            storage_key=storage_key,
+        )
 
-            self.repository.update_run_status(
-                inspection,
-                status=InspectionStatus.PROCESSING,
-                segmentation_status=InspectionStageStatus.PROCESSING,
-                started_at=started_at,
-            )
+    # ------------------------------------------------------------------
+    # ASYNCHRONOUS
+    # ------------------------------------------------------------------
 
-            self.repository.commit()
+    def process_inspection(
+        self,
+        inspection_id: int,
+    ) -> dict | None:
+        """
+        Process an existing pending inspection.
 
-            # =====================================================
-            # 4. Run AI pipeline
-            # =====================================================
+        The worker calls this method after receiving the
+        inspection ID from Celery.
+        """
 
-            result = self.pipeline.run(
-                image_path
-            )
+        self._require_processing_service()
 
-            # =========================
-            # 5. Save detections
-            # =========================
+        return self.processing_service.process(
+            inspection_id
+        )
 
-            detections = result.get(
-                "detections",
-                {},
-            ).get(
-                "items",
-                [],
-            )
-
-            for detection in detections:
-                bbox = detection["bbox"]
-
-                self.repository.add_detection(
-                    inspection_id=inspection_id,
-                    class_name=detection["class_name"],
-                    confidence=detection["confidence"],
-                    x1=bbox[0],
-                    y1=bbox[1],
-                    x2=bbox[2],
-                    y2=bbox[3],
-                )
-
-            # =========================
-            # 6. Save extracted fields
-            # =========================
-
-            extraction = result.get(
-                "extraction",
-                {}
-            )
-
-            ocr = result.get(
-                "ocr",
-                {}
-            )
-
-            for field_name in (
-                "size",
-                "pattern",
-                "brand",
-            ):
-                extraction_field = extraction.get(
-                    field_name,
-                    {},
-                )
-
-                ocr_field = ocr.get(
-                    field_name,
-                    {},
-                )
-
-                self.repository.add_field(
-                    inspection_id=inspection_id,
-                    field_name=field_name,
-                    text=ocr_field.get("text"),
-                    confidence=ocr_field.get(
-                        "confidence",
-                        0.0,
-                    ),
-                    extraction_status=(
-                        extraction_field.get(
-                            "status",
-                            "not_detected",
-                        )
-                    ),
-                    ocr_status=ocr_field.get(
-                        "status",
-                        "not_detected",
-                    ),
-                    source_detections=(
-                        extraction_field.get(
-                            "source_detections",
-                            0,
-                        )
-                    ),
-                )
-
-            # =========================
-            # 7. Finalize inspection
-            # =========================
-
-            completed_at = datetime.utcnow()
-
-            self.repository.update_run_status(
-                inspection,
-                status=result["status"],
-                segmentation_status=(
-                    result["segmentation"]["status"]
-                ),
-                detection_status=(
-                    result["detections"]["status"]
-                ),
-                completed_at=completed_at,
-            )
-
-            # Preserve pipeline processing time.
-            inspection.processing_time_ms = result.get(
-                "processing_time_ms"
-            )
-
-            self.repository.commit()
-
-            # =========================
-            # 8. Return result
-            # =========================
-
-            result["inspection_id"] = inspection_id
-            result["image"] = storage_key
-
-            return result
-
-        except PipelineStageError as exc:
-
-            self.repository.rollback()
-
-            inspection = self.repository.get_run(
-                inspection_id
-            )
-
-            if inspection is None:
-                raise
-
-            self.repository.update_run_status(
-                inspection,
-                status=InspectionStatus.FAILED,
-                error_code=exc.code,
-                error_message=exc.message,
-                failed_stage=exc.stage,
-                completed_at=datetime.utcnow(),
-            )
-
-            self.repository.commit()
-
-            return self.get_inspection(
-                inspection_id
-            )
-
-        except Exception:
-            # =====================================================
-            # Unexpected failure
-            # =====================================================
-
-            self.repository.rollback()
-
-            inspection = self.repository.get_run(
-                inspection_id
-            )
-
-            if inspection is None:
-                raise
-
-            self.repository.update_run_status(
-                inspection,
-                status=InspectionStatus.FAILED,
-                error_code="INSPECTION_FAILED",
-                error_message="Inspection processing failed.",
-                failed_stage="pipeline",
-                completed_at=datetime.utcnow(),
-            )
-
-            self.repository.commit()
-
-            return self.get_inspection(
-                inspection_id
-            )
-
-    # =========================================================
-    # READ INSPECTION
-    # =========================================================
+    # ------------------------------------------------------------------
+    # READ
+    # ------------------------------------------------------------------
 
     def get_inspection(
         self,
         inspection_id: int,
     ) -> dict | None:
+        """
+        Retrieve an inspection from PostgreSQL.
+        """
 
         inspection = self.repository.get_run(
             inspection_id
@@ -267,127 +185,23 @@ class InspectionService:
         if inspection is None:
             return None
 
-        # =====================================================
-        # Detection mapping
-        # =====================================================
+        return InspectionResultMapper.to_response(
+            inspection
+        )
 
-        class_id_mapping = {
-            "size": 0,
-            "pattern": 1,
-            "brand": 2,
-        }
+    # ------------------------------------------------------------------
+    # VALIDATION
+    # ------------------------------------------------------------------
 
-        detection_items = []
-
-        for detection in inspection.detections:
-            detection_items.append(
-                {
-                    "class_id": class_id_mapping.get(
-                        detection.class_name,
-                        -1,
-                    ),
-                    "class_name": detection.class_name,
-                    "confidence": detection.confidence,
-                    "bbox": [
-                        detection.x1,
-                        detection.y1,
-                        detection.x2,
-                        detection.y2,
-                    ],
-                }
+    def _require_image_store(self) -> None:
+        if self.image_store is None:
+            raise RuntimeError(
+                "Image storage is not configured."
             )
 
-        # =====================================================
-        # Field mapping
-        # =====================================================
-
-        fields = {
-            field.field_name: field
-            for field in inspection.fields
-        }
-
-        def build_extraction_item(
-            field_name: str,
-        ) -> dict:
-
-            field = fields.get(field_name)
-
-            if field is None:
-                return {
-                    "status": "not_detected",
-                    "source_detections": 0,
-                }
-
-            return {
-                "status":field.extraction_status,
-                "source_detections": (
-                    field.source_detections
-                ),
-            }
-
-        def build_ocr_item(
-            field_name: str,
-        ) -> dict:
-
-            field = fields.get(field_name)
-
-            if field is None:
-                return {
-                    "text": None,
-                    "confidence": 0.0,
-                    "status": "not_detected",
-                }
-
-            return {
-                "text": field.text,
-                "confidence": field.confidence,
-                "status": field.ocr_status,
-            }
-
-        # =====================================================
-        # Build API response
-        # =====================================================
-
-        return {
-            "inspection_id": inspection_id,
-            "image": inspection.image_path,
-            "status": inspection.status,
-
-            "segmentation": {
-                "status": inspection.segmentation_status,
-            },
-
-            "extraction": {
-                "brand": build_extraction_item(
-                    "brand"
-                ),
-                "size": build_extraction_item(
-                    "size"
-                ),
-                "pattern": build_extraction_item(
-                    "pattern"
-                ),
-            },
-
-            "detections": {
-                "status": inspection.detection_status,
-                "items": detection_items,
-            },
-
-            "ocr": {
-                "brand": build_ocr_item(
-                    "brand"
-                ),
-                "size": build_ocr_item(
-                    "size"
-                ),
-                "pattern": build_ocr_item(
-                    "pattern"
-                ),
-            },
-
-            "processing_time_ms": (
-                inspection.processing_time_ms
-                or 0.0
-            ),
-        }
+    def _require_processing_service(self) -> None:
+        if self.processing_service is None:
+            raise RuntimeError(
+                "Inspection processing service "
+                "is not configured."
+            )

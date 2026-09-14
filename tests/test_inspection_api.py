@@ -109,10 +109,23 @@ def teardown_app():
         del app.state.image_storage
 
 
-def test_post_inspection_success(db_session):
+def test_post_inspection_returns_pending(
+    db_session,
+    monkeypatch,
+):
     setup_app(db_session)
 
     try:
+        queued = {}
+
+        def fake_delay(inspection_id):
+            queued["inspection_id"] = inspection_id
+
+        monkeypatch.setattr(
+            "app.api.v1.inspection.process_inspection.delay",
+            fake_delay,
+        )
+
         client = TestClient(app)
 
         response = client.post(
@@ -126,18 +139,16 @@ def test_post_inspection_success(db_session):
             },
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 202
 
         data = response.json()
 
         assert data["inspection_id"] is not None
-        assert data["image"] == (
-            "inspections/2026/09/test.jpg"
+        assert data["status"] == "pending"
+
+        assert queued["inspection_id"] == (
+            data["inspection_id"]
         )
-        assert data["status"] == "success"
-        assert data["segmentation"]["status"] == "success"
-        assert data["detections"]["status"] == "success"
-        assert data["processing_time_ms"] == 1856.53
 
         repository = InspectionRepository(db_session)
 
@@ -146,9 +157,9 @@ def test_post_inspection_success(db_session):
         )
 
         assert inspection is not None
-        assert inspection.status == "success"
-        assert len(inspection.detections) == 4
-        assert len(inspection.fields) == 3
+        assert inspection.status == "pending"
+        assert inspection.segmentation_status == "pending"
+        assert inspection.detection_status == "pending"
 
     finally:
         teardown_app()
@@ -178,9 +189,11 @@ def test_post_inspection_unsupported_format(db_session):
         assert data["error"]["code"] == (
             "UNSUPPORTED_IMAGE_FORMAT"
         )
+
         assert data["error"]["message"] == (
             "Unsupported image format."
         )
+
         assert data["error"]["details"] == {
             "allowed_formats": [
                 "jpg",
@@ -216,9 +229,91 @@ def test_post_inspection_empty_image(db_session):
         data = response.json()
 
         assert data["error"]["code"] == "EMPTY_IMAGE"
+
         assert data["error"]["details"] == (
             "Uploaded image is empty."
         )
+
+    finally:
+        teardown_app()
+
+
+def test_get_inspection_pending(db_session):
+    setup_app(db_session)
+
+    try:
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.create_run(
+            image_path=(
+                "inspections/2026/09/test.jpg"
+            ),
+            status="pending",
+            segmentation_status="pending",
+            detection_status="pending",
+            processing_time_ms=None,
+        )
+
+        repository.commit()
+
+        client = TestClient(app)
+
+        response = client.get(
+            f"/api/v1/inspection/{inspection.id}"
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        assert data["inspection_id"] == inspection.id
+        assert data["image"] == (
+            "inspections/2026/09/test.jpg"
+        )
+        assert data["status"] == "pending"
+
+        assert data["segmentation"]["status"] == (
+            "pending"
+        )
+
+        assert data["detections"]["status"] == (
+            "pending"
+        )
+
+        assert data["extraction"]["brand"] == {
+            "status": "not_detected",
+            "source_detections": 0,
+        }
+
+        assert data["extraction"]["size"] == {
+            "status": "not_detected",
+            "source_detections": 0,
+        }
+
+        assert data["extraction"]["pattern"] == {
+            "status": "not_detected",
+            "source_detections": 0,
+        }
+
+        assert data["ocr"]["brand"] == {
+            "text": None,
+            "confidence": 0.0,
+            "status": "not_detected",
+        }
+
+        assert data["ocr"]["size"] == {
+            "text": None,
+            "confidence": 0.0,
+            "status": "not_detected",
+        }
+
+        assert data["ocr"]["pattern"] == {
+            "text": None,
+            "confidence": 0.0,
+            "status": "not_detected",
+        }
+
+        assert data["processing_time_ms"] == 0.0
 
     finally:
         teardown_app()
@@ -384,9 +479,11 @@ def test_get_inspection_not_found(db_session):
         assert data["error"]["code"] == (
             "INSPECTION_NOT_FOUND"
         )
+
         assert data["error"]["message"] == (
             "Inspection not found."
         )
+
         assert data["error"]["details"] == {
             "inspection_id": 999999
         }

@@ -5,19 +5,26 @@ from sqlalchemy.orm import Session
 
 from fastapi import (
     APIRouter, 
-    Depends,
-    UploadFile, 
+    Depends, 
     File,
     Request,
+    UploadFile,
+    status,
 )   
 
 from app.core.config import API_INPUT_DIR
 from app.core.exceptions import APIError
-from app.schemas.inspection import InspectionResponse
+from app.schemas.inspection import (
+    InspectionResponse,
+    PendingInspectionResponse,
+)
 
 from app.db.database import get_db
 
 from app.services.inspection_service import InspectionService
+
+from app.workers.inspection_tasks import process_inspection
+
 
 router = APIRouter(
     prefix="/inspection",
@@ -38,7 +45,8 @@ ALLOWED_EXTENSIONS = {
 
 @router.post(
     "",
-    response_model=InspectionResponse,
+    response_model=PendingInspectionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def inspect_tire(
     request : Request,
@@ -96,7 +104,6 @@ async def inspect_tire(
     
     service =InspectionService(
         db=db,
-        pipeline=request.app.state.inspection_pipeline,
         image_store=request.app.state.image_storage,
     )
     
@@ -145,8 +152,12 @@ async def inspect_tire(
         # 7. Run inspection
         # =====================================================
         
-        result = service.inspect(
+        result = service.create_pending_inspection(
             image_path=image_path
+        )
+        
+        process_inspection.delay(
+            result["inspection_id"]
         )
         
         return result

@@ -1,7 +1,5 @@
-from app.core.ai_dependencies import (
-    create_image_storage,
-    create_inspection_pipeline,
-)
+from app.core.ai_dependencies import create_inspection_pipeline
+from app.core.storage_dependencies import create_image_storage
 from app.db.database import SessionLocal
 from app.services.inspection_service import InspectionService
 from app.workers.celery_app import celery_app

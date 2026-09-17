@@ -34,3 +34,4 @@ class DetectionStatus(StrEnum):
     PROCESSING = "processing"
     SUCCESS = "success"
     NOT_DETECTED = "not_detected"
+    FAILED = "failed"

@@ -30,13 +30,33 @@ async def validation_error_handler(
     request: Request,
     exc: RequestValidationError,
 ):
+    
+    errors = []
+    
+    for error in exc.errors():
+        normalized_error = dict(error)
+        
+        ctx = normalized_error.get("ctx")
+        
+        if isinstance(ctx, dict):
+            normalized_ctx = dict(ctx)
+            
+            if "error" in normalized_ctx:
+                normalized_ctx["error"] = str(
+                    normalized_ctx["error"]
+                )
+                
+            normalized_error["ctx"] = normalized_ctx
+            
+        errors.append(normalized_error)
+        
     return JSONResponse(
         status_code=422,
         content={
             "error": {
                 "code": "VALIDATION_ERROR",
                 "message": "Request validation failed.",
-                "details": exc.errors(),
+                "details": errors,
             }
         },
     )

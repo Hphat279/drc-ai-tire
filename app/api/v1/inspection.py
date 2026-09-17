@@ -70,7 +70,9 @@ async def inspect_tire(
     if not image.filename:
         raise APIError(
             status_code=400,
-            details="Image filename is required.",
+            code="IMAGE_FILENAME_REQUIRED",
+            message="Image filename is required.",
+            details=None,
         )
     
     # =========================================================

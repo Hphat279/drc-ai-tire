@@ -185,6 +185,91 @@ def test_post_inspection_returns_pending(
     finally:
         teardown_app()
 
+def test_post_inspection_missing_image_returns_validation_error(
+    db_session,
+):
+    setup_app(db_session)
+
+    try:
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/v1/inspection",
+        )
+
+        assert response.status_code == 422
+
+        data = response.json()
+
+        assert data["error"]["code"] == "VALIDATION_ERROR"
+        assert data["error"]["message"] == (
+            "Request validation failed."
+        )
+        assert isinstance(
+            data["error"]["details"],
+            list,
+        )
+        assert data["error"]["details"]
+
+    finally:
+        teardown_app()
+
+def test_unexpected_exception_returns_internal_server_error(
+    db_session,
+    monkeypatch,
+):
+    setup_app(db_session)
+
+    try:
+        def fake_create_pending_inspection(*args, **kwargs):
+            raise RuntimeError(
+                "SECRET_INTERNAL_DATABASE_ERROR"
+            )
+
+        monkeypatch.setattr(
+            InspectionService,
+            "create_pending_inspection",
+            fake_create_pending_inspection,
+        )
+
+        client = TestClient(
+            app,
+            raise_server_exceptions=False,
+        )
+
+        response = client.post(
+            "/api/v1/inspection",
+            files={
+                "image": (
+                    "test.jpg",
+                    b"fake-image-data",
+                    "image/jpeg",
+                )
+            },
+        )
+
+        assert response.status_code == 500
+
+        data = response.json()
+
+        assert data == {
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": (
+                    "An internal server error occurred."
+                ),
+                "details": None,
+            }
+        }
+
+        assert (
+            "SECRET_INTERNAL_DATABASE_ERROR"
+            not in response.text
+        )
+
+    finally:
+        teardown_app()
+
 def test_post_inspection_enqueue_failure(
     db_session,
     monkeypatch,

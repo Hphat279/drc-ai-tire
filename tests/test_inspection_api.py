@@ -876,6 +876,161 @@ def test_get_inspection_success(db_session):
     finally:
         teardown_app()
 
+def test_get_inspection_processing(db_session):
+    setup_app(db_session)
+
+    try:
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.create_run(
+            image_path="inspections/2026/09/test.jpg",
+            status="processing",
+            segmentation_status="processing",
+            detection_status="processing",
+            processing_time_ms=None,
+        )
+
+        repository.commit()
+
+        client = TestClient(app)
+
+        response = client.get(
+            f"/api/v1/inspection/{inspection.id}"
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        assert data["inspection_id"] == inspection.id
+        assert data["image"] == (
+            "inspections/2026/09/test.jpg"
+        )
+        assert data["status"] == "processing"
+
+        assert data["segmentation"]["status"] == (
+            "processing"
+        )
+
+        assert data["detections"]["status"] == (
+            "processing"
+        )
+
+        assert data["extraction"]["brand"] == {
+            "status": "not_detected",
+            "source_detections": 0,
+        }
+
+        assert data["ocr"]["brand"] == {
+            "text": None,
+            "confidence": 0.0,
+            "status": "not_detected",
+        }
+
+    finally:
+        teardown_app()
+        
+def test_get_inspection_partial(db_session):
+    setup_app(db_session)
+
+    try:
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.create_run(
+            image_path="inspections/2026/09/test.jpg",
+            status="partial",
+            segmentation_status="success",
+            detection_status="success",
+            processing_time_ms=1856.53,
+        )
+
+        repository.commit()
+
+        client = TestClient(app)
+
+        response = client.get(
+            f"/api/v1/inspection/{inspection.id}"
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        assert data["inspection_id"] == inspection.id
+        assert data["image"] == (
+            "inspections/2026/09/test.jpg"
+        )
+        assert data["status"] == "partial"
+
+        assert data["segmentation"]["status"] == (
+            "success"
+        )
+
+        assert data["detections"]["status"] == (
+            "success"
+        )
+
+        assert data["processing_time_ms"] == 1856.53
+
+    finally:
+        teardown_app()
+        
+def test_get_inspection_failed(db_session):
+    setup_app(db_session)
+
+    try:
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.create_run(
+            image_path="inspections/2026/09/test.jpg",
+            status="failed",
+            segmentation_status="failed",
+            detection_status="failed",
+            processing_time_ms=None,
+            error_code="SEGMENTATION_FAILED",
+            error_message="Segmentation failed.",
+            failed_stage="segmentation",
+        )
+
+        repository.commit()
+
+        client = TestClient(app)
+
+        response = client.get(
+            f"/api/v1/inspection/{inspection.id}"
+        )
+
+        assert response.status_code == 200
+
+        data = response.json()
+
+        assert data["inspection_id"] == inspection.id
+        assert data["image"] == (
+            "inspections/2026/09/test.jpg"
+        )
+        assert data["status"] == "failed"
+
+        assert data["segmentation"]["status"] == (
+            "failed"
+        )
+
+        assert data["detections"]["status"] == (
+            "failed"
+        )
+
+        assert data["extraction"]["brand"] == {
+            "status": "not_detected",
+            "source_detections": 0,
+        }
+
+        assert data["ocr"]["brand"] == {
+            "text": None,
+            "confidence": 0.0,
+            "status": "not_detected",
+        }
+
+    finally:
+        teardown_app()
 
 def test_get_inspection_not_found(db_session):
     setup_app(db_session)
@@ -967,3 +1122,6 @@ def test_ocr_status_rejects_invalid_value():
             confidence=0.99,
             status="banana",
         )
+
+
+  

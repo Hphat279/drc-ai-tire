@@ -15,3 +15,22 @@ class InspectionStageStatus(StrEnum):
     SUCCESS = "success"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+class ExtractionStatus(StrEnum):
+    DIRECT = "direct"
+    RECONSTRUCTED = "reconstructed"
+    NOT_DETECTED = "not_detected"
+
+
+class OCRStatus(StrEnum):
+    DIRECT = "direct"
+    RECONSTRUCTED = "reconstructed"
+    NOT_DETECTED = "not_detected"
+    OCR_FAILED = "ocr_failed"
+
+
+class DetectionStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    SUCCESS = "success"
+    NOT_DETECTED = "not_detected"

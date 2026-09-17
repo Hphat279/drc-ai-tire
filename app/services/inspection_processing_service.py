@@ -159,18 +159,7 @@ class InspectionProcessingService:
             result=result,
         )
 
-        response = InspectionResultMapper.to_response(
-            inspection
-        )
-
-        # Keep the raw pipeline result fields that existing
-        # callers/tests may rely on.
-        response.update(result)
-
-        response["inspection_id"] = inspection_id
-        response["image"] = storage_key
-
-        return response
+        return InspectionResultMapper.to_response(inspection)
 
     def _mark_processing(
         self,

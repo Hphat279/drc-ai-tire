@@ -8,6 +8,25 @@ from app.db.database import get_db
 from app.repositories.inspection_repository import InspectionRepository
 from app.services.inspection_service import InspectionService
 
+from app.core.inspection_status import (
+    DetectionStatus,
+    ExtractionStatus,
+    InspectionStatus,
+    InspectionStageStatus,
+    OCRStatus,
+)
+
+import pytest
+from pydantic import ValidationError
+
+from app.schemas.inspection import (
+    DetectionResult,
+    ExtractionItem,
+    InspectionResponse,
+    OCRItem,
+    SegmentationResult,
+)
+
 class FakePipeline:
     def run(self, image_path: Path) -> dict:
         return {
@@ -76,6 +95,7 @@ class FakePipeline:
                 },
             },
             "processing_time_ms": 1856.53,
+            "unexpected": "must_not_appear",
         }
 
 
@@ -416,6 +436,65 @@ def test_inspection_commit_failure(
     finally:
         teardown_app()
 
+def test_inspection_response_uses_canonical_mapper(
+    db_session,
+):
+    setup_app(db_session)
+
+    try:
+        repository = InspectionRepository(db_session)
+
+        inspection = repository.create_run(
+            image_path="inspections/2026/09/test.jpg",
+            status="pending",
+            segmentation_status="pending",
+            detection_status="pending",
+            processing_time_ms=None,
+        )
+        repository.commit()
+
+        service = InspectionService(
+            db=db_session,
+            pipeline=FakePipeline(),
+            image_store=FakeImageStorage(),
+        )
+
+        result = service.processing_service.process_new_run(
+            inspection_id=inspection.id,
+            image_path=Path("test.jpg"),
+            started_at=datetime.now(UTC),
+            storage_key="inspections/2026/09/test.jpg",
+        )
+
+        assert result is not None
+
+        assert result["inspection_id"] == inspection.id
+        assert result["image"] == (
+            "inspections/2026/09/test.jpg"
+        )
+        assert result["status"] == "success"
+
+        assert "unexpected" not in result
+
+        assert result["detections"]["status"] == "success"
+        assert len(result["detections"]["items"]) == 4
+
+        assert result["extraction"]["brand"] == {
+            "status": "reconstructed",
+            "source_detections": 2,
+        }
+
+        assert result["ocr"]["brand"] == {
+            "text": "DPLUS",
+            "confidence": 0.9971,
+            "status": "reconstructed",
+        }
+
+        assert result["processing_time_ms"] == 1856.53
+
+    finally:
+        teardown_app()
+        
 def test_post_inspection_unsupported_format(db_session):
     setup_app(db_session)
 
@@ -741,3 +820,65 @@ def test_get_inspection_not_found(db_session):
 
     finally:
         teardown_app()
+        
+def test_inspection_status_contract():
+    assert InspectionStatus.PENDING == "pending"
+    assert InspectionStatus.PROCESSING == "processing"
+    assert InspectionStatus.SUCCESS == "success"
+    assert InspectionStatus.PARTIAL == "partial"
+    assert InspectionStatus.FAILED == "failed"
+
+
+def test_inspection_stage_status_contract():
+    assert InspectionStageStatus.PENDING == "pending"
+    assert InspectionStageStatus.PROCESSING == "processing"
+    assert InspectionStageStatus.SUCCESS == "success"
+    assert InspectionStageStatus.FAILED == "failed"
+    assert InspectionStageStatus.SKIPPED == "skipped"
+
+
+def test_extraction_status_contract():
+    assert ExtractionStatus.DIRECT == "direct"
+    assert ExtractionStatus.RECONSTRUCTED == "reconstructed"
+    assert ExtractionStatus.NOT_DETECTED == "not_detected"
+
+
+def test_ocr_status_contract():
+    assert OCRStatus.DIRECT == "direct"
+    assert OCRStatus.RECONSTRUCTED == "reconstructed"
+    assert OCRStatus.NOT_DETECTED == "not_detected"
+    assert OCRStatus.OCR_FAILED == "ocr_failed"
+
+
+def test_detection_status_contract():
+    assert DetectionStatus.SUCCESS == "success"
+    assert DetectionStatus.NOT_DETECTED == "not_detected"
+    
+def test_segmentation_status_rejects_invalid_value():
+    with pytest.raises(ValidationError):
+        SegmentationResult(status="banana")
+
+
+def test_extraction_status_rejects_invalid_value():
+    with pytest.raises(ValidationError):
+        ExtractionItem(
+            status="banana",
+            source_detections=1,
+        )
+
+
+def test_detection_status_rejects_invalid_value():
+    with pytest.raises(ValidationError):
+        DetectionResult(
+            status="banana",
+            items=[],
+        )
+
+
+def test_ocr_status_rejects_invalid_value():
+    with pytest.raises(ValidationError):
+        OCRItem(
+            text="DPLUS",
+            confidence=0.99,
+            status="banana",
+        )

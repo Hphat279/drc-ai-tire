@@ -3,13 +3,20 @@
 from pydantic import BaseModel, Field
 from typing import Literal
 
+from app.core.inspection_status import (
+    DetectionStatus,
+    ExtractionStatus,
+    InspectionStageStatus,
+    InspectionStatus,
+    OCRStatus,
+)
 
 class SegmentationResult(BaseModel):
-    status: str = Field(min_length=1)
+    status: InspectionStageStatus
 
 
 class ExtractionItem(BaseModel):
-    status: str = Field(min_length=1)
+    status: ExtractionStatus
     source_detections: int = Field(ge=0)
 
 
@@ -27,14 +34,14 @@ class DetectionItem(BaseModel):
 
 
 class DetectionResult(BaseModel):
-    status: str = Field(min_length=1)
+    status: DetectionStatus
     items: list[DetectionItem]
 
 
 class OCRItem(BaseModel):
     text: str | None
     confidence: float = Field(ge=0, le=1)
-    status: str = Field(min_length=1)
+    status: OCRStatus
 
 
 class OCRResult(BaseModel):
@@ -47,7 +54,7 @@ class InspectionResponse(BaseModel):
     inspection_id: int = Field(ge=1)
     
     image: str = Field(min_length=1)
-    status: str = Field(min_length=1)
+    status: InspectionStatus
 
     segmentation: SegmentationResult
 

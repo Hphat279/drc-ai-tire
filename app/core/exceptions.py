@@ -15,3 +15,13 @@ class APIError(Exception):
         self.details = details
 
         super().__init__(message)
+
+class TransientInfrastructureError(Exception):
+    """
+    An infrastructure error that may succeed when retried.
+
+    This exception is intentionally separated from business and
+    AI pipeline errors so Celery can retry only transient failures.
+    """
+
+    pass

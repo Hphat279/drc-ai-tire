@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.core.exceptions import TransientInfrastructureError
 from app.core.inspection_status import (
     InspectionStageStatus,
     InspectionStatus,
@@ -72,6 +73,9 @@ class InspectionProcessingService:
                 error=exc,
             )
 
+        except TransientInfrastructureError:
+            raise
+
         except Exception:
             return self._handle_unexpected_error(
                 inspection_id=inspection_id,
@@ -104,6 +108,9 @@ class InspectionProcessingService:
                 inspection_id=inspection_id,
                 error=exc,
             )
+
+        except TransientInfrastructureError:
+            raise
 
         except Exception:
             return self._handle_unexpected_error(
@@ -237,23 +244,23 @@ class InspectionProcessingService:
 
         extraction = result.get(
             "extraction",
-            {},
+            {}
         )
 
         ocr = result.get(
             "ocr",
-            {},
+            {}
         )
 
         for field_name in self.FIELD_NAMES:
             extraction_field = extraction.get(
                 field_name,
-                {},
+                {}
             )
 
             ocr_field = ocr.get(
                 field_name,
-                {},
+                {}
             )
 
             self.repository.add_field(

@@ -1,6 +1,7 @@
-from sqlalchemy.orm import Session
-
 from datetime import datetime
+
+from sqlalchemy.orm import Session
+from sqlalchemy import update
 
 from app.models import (
     InspectionDetection,
@@ -136,6 +137,37 @@ class InspectionRepository:
 
         return field
 
+    def claim_pending_run(
+        self,
+        inspection_id: int,
+        started_at: datetime,
+    ) -> bool:
+        """
+        Thực hiện thao tác nguyên tử để nhận một lượt kiểm tra đang ở trạng thái chờ (pending) về xử lý.
+
+        - Trả về True nếu người gọi chuyển đổi thành công trạng thái 
+        của lượt kiểm tra từ chờ sang đang xử lý. 
+        - Trả về False nếu lượt kiểm tra không còn ở trạng thái chờ
+        (nghĩa là đã được nhận hoặc đã hoàn tất).
+        """
+
+        result = self.db.execute(
+            update(InspectionRun)
+            .where(
+                InspectionRun.id == inspection_id,
+                InspectionRun.status == "pending",
+            )
+            .values(
+                status="processing",
+                segmentation_status="processing",
+                started_at=started_at,
+            )
+        )
+
+        self.commit()
+
+        return result.rowcount == 1
+    
     # =========================================================
     # READ
     # =========================================================

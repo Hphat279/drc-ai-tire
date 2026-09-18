@@ -1123,5 +1123,4 @@ def test_ocr_status_rejects_invalid_value():
             status="banana",
         )
 
-
   

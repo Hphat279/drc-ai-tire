@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.services.inspection_service import InspectionService
@@ -5,7 +6,12 @@ from app.services.inspection_service import InspectionService
 from app.models import InspectionRun
 
 class FakePipeline:
+    def __init__(self):
+        self.run_count = 0
+    
     def run(self, image_path: Path) -> dict:
+        self.run_count += 1
+        
         return {
             "status": "success",
             "segmentation": {
@@ -74,6 +80,9 @@ class FakePipeline:
 class FakeImageStore:
     def save(self, image_path: Path) -> str:
         return "inspections/2026/09/test.jpg"
+    
+    def resolve(self, storage_key: str) -> Path:
+        return Path("test.jpg")
 
 
 def test_inspect_success(db_session, tmp_path):
@@ -217,3 +226,73 @@ def test_inspect_persists_failure_on_pipeline_error(db_session, tmp_path):
     assert inspection.failed_stage == "pipeline"
     assert inspection.started_at is not None
     assert inspection.completed_at is not None
+    
+def test_process_inspection_does_not_run_pipeline_twice(
+    db_session,
+    tmp_path,
+):
+    image_path = tmp_path / "test.jpg"
+    image_path.write_bytes(b"fake-image")
+
+    pipeline = FakePipeline()
+
+    service = InspectionService(
+        db=db_session,
+        pipeline=pipeline,
+        image_store=FakeImageStore(),
+    )
+
+    first_result = service.inspect(image_path)
+
+    assert first_result["status"] == "success"
+    assert pipeline.run_count == 1
+
+    inspection_id = first_result["inspection_id"]
+
+    second_result = service.process_inspection(
+        inspection_id
+    )
+
+    assert second_result is not None
+    assert second_result["inspection_id"] == inspection_id
+    assert second_result["status"] == "success"
+    assert pipeline.run_count == 1
+    
+def test_process_inspection_does_not_run_pipeline_when_processing(
+    db_session,
+    tmp_path,
+):
+    image_path = tmp_path / "test.jpg"
+    image_path.write_bytes(b"fake-image")
+
+    pipeline = FakePipeline()
+
+    service = InspectionService(
+        db=db_session,
+        pipeline=pipeline,
+        image_store=FakeImageStore(),
+    )
+
+    created = service.create_pending_inspection(
+        image_path
+    )
+
+    inspection_id = created["inspection_id"]
+
+    started_at = datetime.now(UTC)
+
+    claimed = service.repository.claim_pending_run(
+        inspection_id=inspection_id,
+        started_at=started_at,
+    )
+
+    assert claimed is True
+
+    result = service.process_inspection(
+        inspection_id
+    )
+
+    assert result is not None
+    assert result["inspection_id"] == inspection_id
+    assert result["status"] == "processing"
+    assert pipeline.run_count == 0

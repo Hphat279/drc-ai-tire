@@ -2,7 +2,7 @@ from app.repositories.inspection_repository import (
     InspectionRepository,
 )
 
-from datetime import datetime
+from datetime import datetime, UTC
 
 def test_create_run(db_session):
     repository = InspectionRepository(db_session)
@@ -259,3 +259,65 @@ def test_update_run_status_success(db_session):
     assert refreshed.detection_status == "success"
     assert refreshed.started_at == started_at
     assert refreshed.completed_at == completed_at
+    
+def test_claim_pending_run_success(db_session):
+    repository = InspectionRepository(db_session)
+
+    inspection = repository.create_run(
+        image_path="test.jpg",
+        status="pending",
+        segmentation_status="pending",
+        detection_status="pending",
+        processing_time_ms=None,
+    )
+
+    started_at = datetime.now(UTC)
+
+    claimed = repository.claim_pending_run(
+        inspection_id=inspection.id,
+        started_at=started_at,
+    )
+
+    assert claimed is True
+
+    db_session.refresh(inspection)
+
+    assert inspection.status == "processing"
+    assert inspection.segmentation_status == "processing"
+    assert inspection.started_at == started_at.replace(tzinfo=None)
+
+def test_claim_pending_run_returns_false_when_already_claimed(db_session):
+    repository = InspectionRepository(db_session)
+
+    inspection = repository.create_run(
+        image_path="test.jpg",
+        status="pending",
+        segmentation_status="pending",
+        detection_status="pending",
+        processing_time_ms=None,
+    )
+
+    first_started_at = datetime.now(UTC)
+
+    first_claimed = repository.claim_pending_run(
+        inspection_id=inspection.id,
+        started_at=first_started_at,
+    )
+
+    second_started_at = datetime.now(UTC)
+
+    second_claimed = repository.claim_pending_run(
+        inspection_id=inspection.id,
+        started_at=second_started_at,
+    )
+
+    assert first_claimed is True
+    assert second_claimed is False
+
+    db_session.refresh(inspection)
+
+    assert inspection.status == "processing"
+    assert inspection.segmentation_status == "processing"
+    assert inspection.started_at == first_started_at.replace(tzinfo=None)
+    
+    

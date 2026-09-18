@@ -137,10 +137,24 @@ class InspectionProcessingService:
         if storage_key is None:
             storage_key = inspection.image_path
 
-        self._mark_processing(
-            inspection=inspection,
+        claimed = self.repository.claim_pending_run(
+            inspection_id=inspection_id,
             started_at=started_at,
         )
+
+        if not claimed:
+            inspection = self.repository.get_run(
+                inspection_id
+            )
+
+            if inspection is None:
+                raise ValueError(
+                    f"Inspection not found: {inspection_id}"
+                )
+
+            return InspectionResultMapper.to_response(
+                inspection
+            )
 
         result = self.pipeline.run(image_path)
 

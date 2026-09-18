@@ -19,6 +19,8 @@ from app.schemas.inspection import (
     PendingInspectionResponse,
 )
 
+from app.schemas.error import ErrorResponse
+
 from app.db.database import get_db
 
 from app.services.inspection_service import InspectionService
@@ -47,7 +49,26 @@ ALLOWED_EXTENSIONS = {
     "",
     response_model=PendingInspectionResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "model": ErrorResponse,
+            "description": "Invalid image upload.",
+        },
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+            "model": ErrorResponse,
+            "description": "Request validation failed.",
+        },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": ErrorResponse,
+            "description": "Inspection task could not be queued.",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ErrorResponse,
+            "description": "Internal server error.",
+        },
+    },
 )
+
 async def inspect_tire(
     request : Request,
     image: UploadFile = File(...),
@@ -192,6 +213,20 @@ async def inspect_tire(
 @router.get(
     "/{inspection_id}",
     response_model=InspectionResponse,
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Inspection not found.",
+        },
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+            "model": ErrorResponse,
+            "description": "Request validation failed.",
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            "model": ErrorResponse,
+            "description": "Internal server error.",
+        },
+    },
 )
 
 def get_inspection(
